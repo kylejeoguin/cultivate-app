@@ -1,0 +1,21 @@
+# Treat generated PDF lead magnets (and PDFs generally) as binary so core.autocrlf
+# never line-ending-mangles them. Git auto-detects binary today, but this makes it explicit.
+*.pdf binary
+
+# ---------------------------------------------------------------------------
+# SQL MUST BE LF ON EVERY PLATFORM. (2026-08-06)
+#
+# Why this is not cosmetic: several migrations patch save_log_entry IN PLACE by
+# reading pg_get_functiondef() and doing an exact literal replace, with a guard
+# that RAISEs if the literal isn't found. The function body inherits its line
+# endings from whichever file created it. With core.autocrlf=true (Kyle's Windows
+# default), the working-tree .sql was CRLF while the literal the CLI executed was
+# LF -- so `position(old IN definition)` returned 0 and the migration aborted.
+#
+# Measured 2026-08-06 on a from-zero local replay: match_LF = 0, match_CRLF = 2957.
+# CI (ubuntu) checks out LF and was unaffected, so this failed ONLY on Windows --
+# i.e. only where the native build's local dev will actually run.
+#
+# Forcing eol=lf makes a local replay byte-identical to CI's.
+# ---------------------------------------------------------------------------
+*.sql text eol=lf

@@ -1,0 +1,115 @@
+name: CI
+
+# Safety net added 2026-06-29 (BUILD-BIBLE gap-audit P4). Until now the only thing
+# standing between a bad change and paying users was Vercel's own `next build`. This
+# runs the same build (the real prod gate) on every PR + push to main, plus lint and
+# a Playwright smoke suite (public pages + the auth-guard regression checks) and a
+# pgTAP RLS db-test job (proves tenant isolation against an ephemeral local schema).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run if the same ref is pushed again.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Lint + Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Required gate (2026-06-30): the pre-existing eslint ERROR debt (a11y,
+      # no-explicit-any, no-children-prop, etc.) was fully cleared to zero, so lint
+      # errors now block merges. Warnings (unused-vars + the intentionally-warn
+      # react-compiler rules) remain visible but non-blocking via eslint's exit code.
+      - name: Lint
+        run: npm run lint
+
+      # The real gate. `next build` also type-checks (no ignoreBuildErrors set).
+      # Build-time code only touches static data + NEXT_PUBLIC_* placeholders;
+      # Supabase/Stripe/Anthropic are read at request time, not build time.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: https://mycultivate.app
+
+  e2e-smoke:
+    name: E2E smoke (public pages + auth guards)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Build with placeholder NEXT_PUBLIC_* (inlined into the client bundle).
+      # Smoke pages are static; the auth-guard checks hit API routes that 401
+      # before touching Supabase/Stripe/Anthropic, so no real secrets are needed.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: https://mycultivate.app
+
+      # CI=true → playwright.config starts `npm run start` (serves the build).
+      # Only the *.smoke specs run here; auth/billing/export specs self-skip
+      # (no E2E_TEST_* creds), keeping CI hermetic and green.
+      - name: Run smoke specs
+        run: npm run test:e2e:smoke
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  db-tests:
+    name: pgTAP RLS isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # ubuntu-latest ships Docker. Bring up the local Postgres only (every other
+      # service excluded) — `supabase start` auto-applies supabase/migrations, so the
+      # CI/local baseline (00000000000000_baseline.sql, the prod schema snapshot) is
+      # in place. The auth schema + auth.uid() come from the db image, not gotrue,
+      # so the RLS test works without the auth service running.
+      - name: Start local Supabase (db only)
+        run: supabase start -x studio,realtime,storage-api,imgproxy,inbucket,edge-runtime,logflare,vector,supavisor,gotrue,postgrest,kong,postgres-meta
+
+      # Runs every supabase/tests/database/*.test.sql via pg_prove. Currently:
+      # rls_isolation.test.sql — proves an authenticated user CANNOT read another
+      # tenant's children (the guarantee the anon-probe E2E test can't cover).
+      - name: Run pgTAP tests
+        run: supabase test db

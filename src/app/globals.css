@@ -1,0 +1,294 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: `dark:` utilities respond to a `.dark` class on <html>
+   so the theme is user-toggleable, not locked to the OS preference. Default is
+   LIGHT (see the no-flash script in ThemeProvider.tsx); dark is opt-in from Account
+   settings. Added 2026-06-02 (theming Phase 0); default flipped 2026-07-24. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Semantic color tokens ──────────────────────────────────────────────────
+   Components use these (bg-surface, text-content, border-line, …) instead of
+   hardcoded stone/white literals so light + dark is one source of truth.
+   `:root` = light values · `.dark` = dark values. As screens are rebuilt onto
+   the shared section template (IA redesign), they swap literals → these tokens. */
+:root {
+  --surface: #faf9f7;        /* page background */
+  --card: #ffffff;           /* card / panel surface */
+  --elevated: #f5f5f4;       /* inputs, raised chips */
+  --content: #1c1917;        /* primary text */
+  --muted: #57534e;          /* secondary text */
+  /* Was #78716c, which measured 4.39:1 on --elevated (#f5f5f4) — just under the 4.5:1 that
+     WCAG 2.2 AA requires for normal text, and it is used for the small uppercase labels all
+     over the marketing pages. #6b6560 measures ~5.2:1 on the same surface. */
+  --subtle: #6b6560;         /* tertiary text / hints */
+  --line: #e7e5e4;           /* default border */
+  --line-strong: #d6d3d1;    /* emphasized border */
+
+  /* legacy aliases kept so existing body styling keeps working */
+  --background: var(--surface);
+  --foreground: var(--content);
+}
+
+.dark {
+  --surface: #0c0a09;
+  --card: #1c1917;
+  --elevated: #292524;
+  --content: #fafaf9;
+  --muted: #a8a29e;
+  --subtle: #78716c;
+  --line: #292524;
+  --line-strong: #44403c;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-elevated: var(--elevated);
+  --color-content: var(--content);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--surface);
+  color: var(--content);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* iOS safe area support for PWA bottom nav */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent iOS Safari auto-zoom on input focus (triggers when font-size < 16px).
+   Sets font-size to 16px on iOS only — doesn't affect desktop layout. */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* <PrintFrame> wrapper: on screen it's completely transparent (display:contents makes the
+   table/tbody/tr/td vanish from the box tree, so the report content lays out exactly as if
+   the wrapper weren't there), and the thead/tfoot spacers are hidden. In @media print it
+   turns into a real table whose <thead>/<tfoot> repeat on every sheet → per-page margins. */
+.print-frame,
+.print-frame > tbody,
+.print-frame > tbody > tr,
+.print-frame > tbody > tr > td {
+  display: contents;
+}
+.print-frame > thead,
+.print-frame > tfoot {
+  display: none;
+}
+
+/* Standardize every printable document to US Letter. Without this, the paper size
+   falls back to the printer/locale default (A4 in much of the world), which breaks
+   layouts designed for 8.5×11. (C1 — Kyle feedback 2026-06-02)
+
+   MARGINS — dialog-independent, on EVERY sheet (2026-07-06, several rounds with Kyle):
+   • The print dialog's "Margins" dropdown overrides CSS `@page { margin }` — set to "None"
+     it forces 0, so an @page margin can't be relied on (it printed edge-to-edge for Kyle).
+   • Element padding survives the dialog but pads the content block only ONCE — page-1 top
+     only, never interior pages.
+   • The one thing that repeats on every printed sheet regardless of dialog is a TABLE
+     HEADER/FOOTER GROUP. So in print we render the report as a table (`display: table`,
+     width = page − 1in centered = left/right margin) with an empty header-group and
+     footer-group spacer (`::before`/`::after`, 0.5in) — the browser repeats those at the
+     top and bottom of EVERY sheet, giving page 2, 3, … a real top+bottom margin no matter
+     the dialog setting or report length. Scoped away from the yearbook (full-bleed).
+   (headless page.pdf() renders this content layout, but verify the repeat on a real
+   Ctrl+P / Save-as-PDF — pseudo-element header-groups can differ from a real <thead>.)
+
+   The yearbook is untouched: it prints via the named `@page yearbook { margin: 0 }`
+   below (its pages carry `page: yearbook`) and a `main:has(.yb-page)` padding:0
+   override, so it stays full-bleed. */
+@page {
+  size: letter;
+}
+
+/* The yearbook prints EDGE-TO-EDGE (full bleed): the cream paper fills the whole
+   letter sheet with no white frame. A named page zeroes the printer margin for
+   yearbook pages only — reports/transcripts keep the default margin above. The
+   book's breathing room is moved *inside* each .yb-page as padding (see @media
+   print below), so content never touches the paper edge. */
+@page yearbook {
+  size: letter;
+  margin: 0;
+}
+
+@media print {
+  /* Flatten the dark app UI (reports, transcripts) to printable light — but NOT the
+     yearbook, which is already a light keepsake and manages its own warm palette. The
+     :not() scoping excludes .yb-page and everything inside it, so the award-card tints,
+     stat cards, and photo frames keep their author colors instead of flattening to
+     white. (Chrome generates the PDF and supports complex :not(); safe here.) */
+  *:not(.yb-page):not(.yb-page *) {
+    background: white !important;
+    color: #1c1917 !important;
+    border-color: #d6d3d1 !important;
+  }
+  * {
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* App chrome must never bleed into a printed/PDF document. `aside` covers the
+     fixed desktop SideNav (h-screen) that was collapsing prints to a single page. */
+  nav,
+  aside,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+
+  /* The reliable document margin (see the @page note above): padding survives any print
+     dialog setting → left/right on every page + top of page 1 + bottom of the last page.
+     Interior-page (page 2+) top margins come from Chrome's own per-page margin, which only
+     applies when the dialog's Margins = "Default" (we intentionally don't declare an @page
+     margin so we don't override it). */
+  main {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  /* The report content is wrapped in <PrintFrame> (a table with a real <thead>/<tfoot>
+     spacer). A REAL thead/tfoot repeats on every printed sheet (a CSS pseudo-element one
+     does NOT — Chrome ignores it), so this is what actually gives page 2, 3, … a top+bottom
+     margin regardless of the print dialog. The table itself provides the left/right margin
+     (centered, page − 1in). On screen the whole wrapper is display:contents (invisible). */
+  .print-frame {
+    display: table !important;
+    width: calc(100% - 1in) !important;
+    margin: 0 auto !important;
+    table-layout: fixed;
+  }
+  .print-frame > thead { display: table-header-group !important; }
+  .print-frame > tfoot { display: table-footer-group !important; }
+  .print-frame > tbody { display: table-row-group !important; }
+  .print-frame > thead > tr > td,
+  .print-frame > tfoot > tr > td { height: 0.5in; padding: 0; }
+  .print-frame > tbody > tr,
+  .print-frame > thead > tr,
+  .print-frame > tfoot > tr { display: table-row !important; }
+  .print-frame > tbody > tr > td { display: table-cell !important; padding: 0; }
+
+  /* Yearbook is full-bleed: drop main's print margin so the cream reaches the paper
+     edge, and paint the surface cream so no white ever shows through gaps. (:has()
+     scopes this to the yearbook only — reports keep the 0.5in main padding above.) */
+  main:has(.yb-page) {
+    padding: 0 !important;
+    background: #fbf7ef !important;
+  }
+
+  /* Pagination: let a tall section (a child's full report) flow across pages, but keep each
+     BLOCK inside it — a stat row, a compliance card, the subject table — intact, so a page
+     break lands cleanly BETWEEN blocks instead of slicing one in half. (Was
+     `section { page-break-inside: avoid }`, which, when a section was taller than the space
+     left on the page, let the browser break it at an arbitrary point mid-card.) */
+  section {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  /* Keep each card/block intact so a page break lands cleanly BETWEEN blocks, never
+     mid-card. Reports build content from `rounded-xl` cards — some inside <section>
+     (homeschool), some as plain <div> (home-diy, homestead, projects) — so protect both.
+     Excludes the yearbook, which manages its own fixed-height full-bleed pages. */
+  section > *:not(.print-flow),
+  [class*="rounded-xl"]:not(.yb-page):not(.yb-page *):not(.print-flow) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* A tall card (a project report card, or a long expense/task list) can be taller than the
+     space left on the page — the blanket break-inside: avoid above would then shove the
+     WHOLE card to the next page, leaving a big blank gap behind it. Two opt-in classes fix
+     this cleanly:
+       .print-flow — this card MAY break across pages (single-line list rows never split, so
+                     a break lands cleanly between rows).
+       .print-keep — hold this specific multi-line block (e.g. a stat grid) intact, so it's
+                     never sliced across a page even though its parent .print-flow may break.
+     Together: the card fills the page and continues on the next, instead of jumping whole. */
+  .print-flow {
+    break-inside: auto;
+    page-break-inside: auto;
+    /* overflow: hidden (used to clip the card's rounded corners on screen) makes browsers
+       treat the card as an unbreakable monolith — override so it can actually flow. */
+    overflow: visible !important;
+  }
+  .print-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Never break right AFTER a section title — so a title (e.g. "GARDEN") is never left
+     orphaned at the bottom of a page while its content moves to the next; it moves to the
+     next page WITH its first block instead. Covers both real headings AND the section
+     labels the reports render as <p>/<span> with the uppercase + letter-spacing style
+     (13 h3, 4 h4, 22 p, 5 span across the reports). Excludes the yearbook. */
+  h1:not(.yb-page *),
+  h2:not(.yb-page *),
+  h3:not(.yb-page *),
+  h4:not(.yb-page *),
+  h5:not(.yb-page *),
+  h6:not(.yb-page *),
+  [class~="uppercase"][class*="tracking-wid"]:not(.yb-page *),
+  /* …and the WRAPPER when a title is nested in a header row (label + a "Manage →" link,
+     e.g. the intelligence report): the break falls after the wrapper, not the label, so the
+     label's own break-after can't catch it. Target a header-row wrapper whose direct child is
+     a section label — but NOT a content CARD that merely happens to lead with a label
+     (rounded-xl cards are self-contained blocks; break-after: avoid on them cascades and
+     shoves a group of cards to the next page even when they'd fit). */
+  div:has(> [class~="uppercase"][class*="tracking-wid"]):not([class*="rounded-xl"]):not(.yb-page *) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .print-page-break {
+    page-break-after: always;
+  }
+
+  /* The yearbook is a warm keepsake — keep its paper color when printed (class
+     specificity beats the universal white-flatten above; photos print via
+     -webkit-print-color-adjust: exact). Each .yb-page is a full letter sheet: a
+     DEFINITE height (100vh against the zero-margin @page) so the flex photo walls
+     resolve against it and shrink to fill exactly one sheet (a min-height instead
+     lets the photos balloon to natural size and overflow). Overflow is hidden as a
+     backstop so nothing ever spills onto a second sheet. The book margin lives
+     inside as padding so content never touches the paper edge. */
+  .yb-page {
+    page: yearbook;
+    background: #fbf7ef !important;
+    margin: 0 !important;
+    height: 100vh;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 0.5in 0.55in !important;
+    border-radius: 0 !important;
+  }
+
+  .print-header {
+    display: block !important;
+  }
+}
